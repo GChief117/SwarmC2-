@@ -1,0 +1,19 @@
+{
+  "name": "swarm-c2",
+  "version": "1.0.0",
+  "description": "Real-time aircraft tracking and visualization system built for Swarm Aero interview demonstration.",
+  "main": "index.js",
+  "scripts": {
+    "mock": "node mock-server.mjs",
+    "dev": "cd frontend && npm run dev",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "type": "module",
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^17.2.4",
+    "ws": "^8.19.0"
+  }
+}
