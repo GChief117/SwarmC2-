@@ -14,6 +14,7 @@ WORKDIR /app/backend
 COPY backend/go.* ./
 RUN go mod download
 COPY backend/ ./
+RUN go mod tidy
 # Copy frontend dist into backend/static
 COPY --from=frontend-build /app/frontend/dist ./static/
 RUN CGO_ENABLED=0 GOOS=linux go build -o server .
