@@ -30,7 +30,7 @@ Made a real-time aircraft surveillance and tactical analysis platform with live 
 │  Builds to static files → served by Go backend  │
 ├─────────────────────────────────────────────────┤
 │  Backend (Go)                                   │
-│  WebSocket server · OpenSky poller · OpenAI API │
+│  WebSocket server · OpenSky poller · Claude API │
 │  Serves frontend static files in production     │
 └─────────────────────────────────────────────────┘
 ```
@@ -68,7 +68,7 @@ cd frontend && npm run dev
 
 | Key | Purpose | Source |
 |-----|---------|--------|
-| `OPENAI_API_KEY` | SENTINEL AI analysis | [platform.openai.com](https://platform.openai.com/api-keys) |
+| `Claude_API_KEY` | SENTINEL AI analysis | [platform.Claude.com](https://platform.Claude.com/api-keys) |
 | `VITE_MAPTILER_KEY` | Satellite tiles + terrain | [cloud.maptiler.com](https://cloud.maptiler.com/account/keys) |
 | `OPENSKY_CLIENT_ID` | Aircraft data (OAuth2) | [opensky-network.org](https://opensky-network.org) |
 | `OPENSKY_CLIENT_SECRET` | Aircraft data (OAuth2) | Same |
@@ -80,7 +80,7 @@ cd frontend && npm run dev
 3. Select `swarm-c2` repo — Railway auto-detects `railway.json`
 4. Add variables in the **Variables** tab:
    ```
-   OPENAI_API_KEY=sk-proj-...
+   Claude_API_KEY=sk-proj-...
    VITE_MAPTILER_KEY=...
    OPENSKY_CLIENT_ID=...
    OPENSKY_CLIENT_SECRET=...
@@ -93,7 +93,7 @@ cd frontend && npm run dev
 ```bash
 npm i -g @railway/cli && railway login
 railway init
-railway variables set OPENAI_API_KEY=... VITE_MAPTILER_KEY=... OPENSKY_CLIENT_ID=... OPENSKY_CLIENT_SECRET=...
+railway variables set Claude_API_KEY=... VITE_MAPTILER_KEY=... OPENSKY_CLIENT_ID=... OPENSKY_CLIENT_SECRET=...
 railway up
 ```
 
@@ -102,7 +102,7 @@ railway up
 ```
 swarm-c2/
 ├── backend/
-│   └── main.go            # Go: WebSocket, OpenSky poller, OpenAI, static server
+│   └── main.go            # Go: WebSocket, OpenSky poller, Claude, static server
 ├── frontend/src/
 │   ├── App.jsx             # WebSocket state, region management
 │   ├── index.css           # All styles
