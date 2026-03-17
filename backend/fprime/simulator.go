@@ -135,7 +135,7 @@ func (s *Simulator) initDrones() {
 				"NavigationUpdate":  10,
 				"HealthMonitoring":  10,
 				"ObjectDetection":   10,
-				"TelemetryDownlink": 1,
+				"GroundControlDownlink": 1,
 			},
 		}
 		s.fleet.UpdateDrone(state)
@@ -506,7 +506,7 @@ func (s *Simulator) generateEvents(d *DroneState, ss *droneSimState) {
 			DroneID:   d.DroneID,
 			Severity:  "info",
 			Category:  "scheduling",
-			Message:   "Pipeline: 400Hz attitude | 100Hz guidance | 10Hz nav/health | 1Hz downlink",
+			Message:   "Pipeline: 400Hz attitude | 100Hz guidance | 10Hz nav/health | 1Hz ground ctrl",
 		})
 	}
 

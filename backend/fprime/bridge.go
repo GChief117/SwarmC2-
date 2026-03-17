@@ -138,7 +138,7 @@ var ControlPipeline = []ControlPipelineStage{
 	{"NavigationUpdate", 10, 5000, 3},       // 10 Hz
 	{"HealthMonitoring", 10, 2000, 4},       // 10 Hz
 	{"ObjectDetection", 10, 8000, 5},        // 10 Hz — range check at 5m
-	{"TelemetryDownlink", 1, 3000, 6},       // 1 Hz — ground control link
+	{"GroundControlDownlink", 1, 3000, 6},   // 1 Hz — ground control link
 }
 
 // ============================================================
