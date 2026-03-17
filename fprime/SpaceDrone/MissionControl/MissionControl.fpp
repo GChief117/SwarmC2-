@@ -29,14 +29,27 @@ module SpaceDrone {
   active component MissionControl {
 
     # ------------------------------------------------------------------
+    # F Prime standard ports
+    # ------------------------------------------------------------------
+    command recv port CmdDisp
+    command reg port CmdReg
+    command resp port CmdStatus
+    event port Log
+    text event port LogText
+    time get port Time
+    telemetry port Tlm
+    param get port ParamGet
+    param set port ParamSet
+
+    # ------------------------------------------------------------------
     # Command interface (ground-to-drone via CCSDS S-band uplink)
     # ------------------------------------------------------------------
 
     @ Send a new waypoint to the navigation system
     async command SEND_WAYPOINT(
-      latitude: F64   @< Target latitude
-      longitude: F64  @< Target longitude
-      altitude: F64   @< Target altitude MSL
+      latitude: F64,   @< Target latitude
+      longitude: F64,  @< Target longitude
+      altitude: F64    @< Target altitude MSL
     ) opcode 0x1001
 
     @ Command the drone to hold position
@@ -108,24 +121,24 @@ module SpaceDrone {
 
     @ FSM state transition occurred
     event StateTransition(
-      fromState: SpaceDrone.FSMState
-      toState: SpaceDrone.FSMState
-      input: SpaceDrone.FSMInput
+      fromState: SpaceDrone.FSMState,
+      toState: SpaceDrone.FSMState,
+      trigger: SpaceDrone.FSMInput
     ) severity activity high \
       format "FSM transition: {} --[{}]--> {}"
 
     @ Moore output changed
     event MooreOutputChanged(
-      state: SpaceDrone.FSMState
-      output: string size 32
+      fsmState: SpaceDrone.FSMState,
+      mooreOut: string size 32
     ) severity activity low \
       format "Moore output: {} → {}"
 
     @ Mealy output generated during transition
     event MealyOutput(
-      fromState: SpaceDrone.FSMState
-      input: SpaceDrone.FSMInput
-      output: string size 32
+      fromState: SpaceDrone.FSMState,
+      trigger: SpaceDrone.FSMInput,
+      mealyOut: string size 32
     ) severity activity low \
       format "Mealy output: ({}, {}) → {}"
 
@@ -141,8 +154,8 @@ module SpaceDrone {
 
     @ Invalid transition attempted (should never fire if Theorem 2 holds)
     event InvalidTransition(
-      state: SpaceDrone.FSMState
-      input: SpaceDrone.FSMInput
+      fsmState: SpaceDrone.FSMState,
+      trigger: SpaceDrone.FSMInput
     ) severity warning high \
       format "Undefined transition attempted: state={}, input={}"
 

@@ -8,6 +8,19 @@ module SpaceDrone {
   active component HealthMonitor {
 
     # ------------------------------------------------------------------
+    # F Prime standard ports
+    # ------------------------------------------------------------------
+    command recv port CmdDisp
+    command reg port CmdReg
+    command resp port CmdStatus
+    event port Log
+    text event port LogText
+    time get port Time
+    telemetry port Tlm
+    param get port ParamGet
+    param set port ParamSet
+
+    # ------------------------------------------------------------------
     # Commands
     # ------------------------------------------------------------------
 
@@ -63,8 +76,8 @@ module SpaceDrone {
 
     @ Subsystem health changed
     event SubsystemHealthChange(
-      subsystem: string size 32
-      oldStatus: SpaceDrone.HealthStatus
+      subsystem: string size 32,
+      oldStatus: SpaceDrone.HealthStatus,
       newStatus: SpaceDrone.HealthStatus
     ) severity activity high \
       format "Subsystem {} health: {} -> {}"
@@ -77,10 +90,10 @@ module SpaceDrone {
 
     @ System health summary
     event HealthSummary(
-      healthy: U8
-      warning: U8
-      critical: U8
-      offline: U8
+      healthyCount: U8,
+      warningCount: U8,
+      criticalCount: U8,
+      offlineCount: U8
     ) severity activity low \
       format "Health: {}H {}W {}C {}O"
 

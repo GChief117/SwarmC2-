@@ -9,6 +9,19 @@ module SpaceDrone {
   active component Communications {
 
     # ------------------------------------------------------------------
+    # F Prime standard ports
+    # ------------------------------------------------------------------
+    command recv port CmdDisp
+    command reg port CmdReg
+    command resp port CmdStatus
+    event port Log
+    text event port LogText
+    time get port Time
+    telemetry port Tlm
+    param get port ParamGet
+    param set port ParamSet
+
+    # ------------------------------------------------------------------
     # Commands
     # ------------------------------------------------------------------
 
@@ -82,7 +95,7 @@ module SpaceDrone {
 
     @ Link state changed
     event LinkStateChange(
-      oldState: SpaceDrone.LinkState
+      oldState: SpaceDrone.LinkState,
       newState: SpaceDrone.LinkState
     ) severity activity high \
       format "Link state: {} -> {}"
@@ -105,7 +118,7 @@ module SpaceDrone {
 
     @ APID mismatch on received command
     event APIDMismatch(
-      expected: U16
+      expected: U16,
       received: U16
     ) severity warning low \
       format "APID mismatch: expected={}, received={}"

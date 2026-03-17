@@ -16,6 +16,19 @@ module SpaceDrone {
   active component PowerManagement {
 
     # ------------------------------------------------------------------
+    # F Prime standard ports
+    # ------------------------------------------------------------------
+    command recv port CmdDisp
+    command reg port CmdReg
+    command resp port CmdStatus
+    event port Log
+    text event port LogText
+    time get port Time
+    telemetry port Tlm
+    param get port ParamGet
+    param set port ParamSet
+
+    # ------------------------------------------------------------------
     # Commands
     # ------------------------------------------------------------------
 
@@ -34,8 +47,8 @@ module SpaceDrone {
 
     @ Set low-power mode thresholds
     async command SET_THRESHOLDS(
-      criticalPercent: F64  @< Battery % for CRITICAL alert
-      warningPercent: F64   @< Battery % for WARNING alert
+      criticalPercent: F64,  @< Battery % for CRITICAL alert
+      warningPercent: F64    @< Battery % for WARNING alert
     ) opcode 0x5004
 
     # ------------------------------------------------------------------
@@ -88,15 +101,15 @@ module SpaceDrone {
 
     @ Energy expenditure approaching budget limit
     event EnergyWarning(
-      expenditure: F64
-      budget: F64
+      expenditure: F64,
+      budget: F64,
       marginPercent: F64
     ) severity warning high \
       format "Energy warning: E={} Wh / B={} Wh ({}% margin remaining)"
 
     @ Energy invariance violation
     event EnergyInvarianceViolation(
-      expenditure: F64
+      expenditure: F64,
       budget: F64
     ) severity warning high \
       format "INVARIANCE VIOLATION: E(C')={} > B={}"

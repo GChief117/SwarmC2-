@@ -8,14 +8,27 @@ module SpaceDrone {
   active component GNC {
 
     # ------------------------------------------------------------------
+    # F Prime standard ports
+    # ------------------------------------------------------------------
+    command recv port CmdDisp
+    command reg port CmdReg
+    command resp port CmdStatus
+    event port Log
+    text event port LogText
+    time get port Time
+    telemetry port Tlm
+    param get port ParamGet
+    param set port ParamSet
+
+    # ------------------------------------------------------------------
     # Commands
     # ------------------------------------------------------------------
 
     @ Load a waypoint into the guidance queue
     async command LOAD_WAYPOINT(
-      latitude: F64
-      longitude: F64
-      altitude: F64
+      latitude: F64,
+      longitude: F64,
+      altitude: F64,
       speed: F64       @< Target ground speed, m/s
     ) opcode 0x4001
 
@@ -34,8 +47,8 @@ module SpaceDrone {
 
     @ Execute evasion maneuver in given direction
     async command EXECUTE_EVASION(
-      bearing: F64   @< Evasion heading, degrees
-      distance: F64  @< Minimum displacement, meters
+      bearing: F64,   @< Evasion heading, degrees
+      distance: F64   @< Minimum displacement, meters
     ) opcode 0x4005
 
     # ------------------------------------------------------------------
@@ -91,8 +104,8 @@ module SpaceDrone {
 
     @ Waypoint reached
     event WaypointReached(
-      waypointIndex: U32
-      latitude: F64
+      waypointIndex: U32,
+      latitude: F64,
       longitude: F64
     ) severity activity high \
       format "Waypoint {} reached at ({}, {})"
@@ -103,7 +116,7 @@ module SpaceDrone {
 
     @ Evasion maneuver initiated
     event EvasionStarted(
-      bearing: F64
+      bearing: F64,
       distance: F64
     ) severity warning high \
       format "Evasion maneuver: heading {} for {}m"

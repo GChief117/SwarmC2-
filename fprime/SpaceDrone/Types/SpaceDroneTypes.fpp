@@ -118,7 +118,7 @@ module SpaceDrone {
   @ FSM transition record for audit trail
   struct FSMTransition {
     fromState: FSMState   @< State before transition
-    input: FSMInput       @< Input that triggered transition
+    trigger: FSMInput     @< Input that triggered transition
     toState: FSMState     @< State after transition
     mooreOutput: string size 32   @< Moore output of new state
     mealyOutput: string size 32   @< Mealy output of transition (if any)
@@ -127,33 +127,33 @@ module SpaceDrone {
 
   @ Port for proximity alert notifications between ObjectDetection and MissionControl
   port ProximityAlert(
-    threatLevel: ThreatLevel  @< Severity of detected threat
-    bearing: F64              @< Bearing to threat, degrees
-    range: F64                @< Distance to threat, meters
-    closingSpeed: F64         @< Rate of range decrease, m/s
+    threatLevel: ThreatLevel,  @< Severity of detected threat
+    bearing: F64,              @< Bearing to threat, degrees
+    range: F64,                @< Distance to threat, meters
+    closingSpeed: F64          @< Rate of range decrease, m/s
   )
 
   @ Port for telemetry data distribution
   port TelemetryPort(
-    ref telemetry: DroneTelemetry  @< Complete telemetry frame
+    droneData: DroneTelemetry  @< Complete telemetry frame
   )
 
   @ Port for FSM state change notifications
   port FSMStateChange(
-    oldState: FSMState  @< Previous state
-    newState: FSMState  @< New state
-    input: FSMInput     @< Triggering input
+    oldState: FSMState,  @< Previous state
+    newState: FSMState,  @< New state
+    trigger: FSMInput    @< Triggering input
   )
 
   @ Port for energy budget updates
   port EnergyUpdate(
-    ref budget: EnergyBudget  @< Current energy state
+    budget: EnergyBudget  @< Current energy state
   )
 
   @ Port for health status reporting
   port HealthReport(
-    subsystem: string size 32  @< Name of reporting subsystem
-    status: HealthStatus       @< Current health
-    message: string size 128   @< Diagnostic message
+    subsystem: string size 32,  @< Name of reporting subsystem
+    healthStatus: HealthStatus, @< Current health
+    message: string size 128    @< Diagnostic message
   )
 }

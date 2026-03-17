@@ -8,6 +8,19 @@ module SpaceDrone {
   active component ObjectDetection {
 
     # ------------------------------------------------------------------
+    # F Prime standard ports
+    # ------------------------------------------------------------------
+    command recv port CmdDisp
+    command reg port CmdReg
+    command resp port CmdStatus
+    event port Log
+    text event port LogText
+    time get port Time
+    telemetry port Tlm
+    param get port ParamGet
+    param set port ParamSet
+
+    # ------------------------------------------------------------------
     # Commands
     # ------------------------------------------------------------------
 
@@ -67,8 +80,8 @@ module SpaceDrone {
 
     @ New object detected within safety radius
     event ObjectDetected(
-      range: F64
-      bearing: F64
+      range: F64,
+      bearing: F64,
       closingSpeed: F64
     ) severity warning high \
       format "Object detected: range={}m, bearing={}°, closing={}m/s"
@@ -81,14 +94,14 @@ module SpaceDrone {
 
     @ Collision avoidance alert escalated
     event ThreatEscalated(
-      oldLevel: SpaceDrone.ThreatLevel
+      oldLevel: SpaceDrone.ThreatLevel,
       newLevel: SpaceDrone.ThreatLevel
     ) severity warning high \
       format "Threat escalated: {} -> {}"
 
     @ Formation separation warning
     event FormationWarning(
-      droneId: string size 32
+      droneId: string size 32,
       separation: F64
     ) severity warning low \
       format "Formation drone {} too close: {}m"

@@ -27,3 +27,8 @@ Thumbs.db
 
 # Logs
 *.log
+
+# F Prime
+fprime-framework/
+fprime/build-fprime-automatic-native/
+fprime/build-artifacts/
