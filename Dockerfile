@@ -25,5 +25,6 @@ RUN apk --no-cache add ca-certificates
 WORKDIR /app
 COPY --from=backend-build /app/backend/server .
 COPY --from=backend-build /app/backend/static ./static/
+COPY fprime/ ./fprime/
 EXPOSE 8080
 CMD ["./server"]

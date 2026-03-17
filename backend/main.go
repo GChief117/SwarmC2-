@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"sync"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/rs/cors"
+	"swarm-c2/fprime"
 )
 
 // OpenAI Integration
@@ -134,26 +136,29 @@ Provide analysis in this JSON structure:
 - Provide context for non-expert operators
 - Maintain operational security awareness in recommendations`
 
-// OpenAI API structures
-type OpenAIMessage struct {
+// Anthropic API structures
+type AnthropicMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
 }
 
-type OpenAIRequest struct {
-	Model       string          `json:"model"`
-	Messages    []OpenAIMessage `json:"messages"`
-	Temperature float64         `json:"temperature"`
-	MaxTokens   int             `json:"max_tokens"`
+type AnthropicRequest struct {
+	Model       string             `json:"model"`
+	MaxTokens   int                `json:"max_tokens"`
+	System      string             `json:"system,omitempty"`
+	Messages    []AnthropicMessage `json:"messages"`
+	Temperature float64            `json:"temperature"`
 }
 
-type OpenAIChoice struct {
-	Message OpenAIMessage `json:"message"`
+type AnthropicContentBlock struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
 }
 
-type OpenAIResponse struct {
-	Choices []OpenAIChoice `json:"choices"`
+type AnthropicResponse struct {
+	Content []AnthropicContentBlock `json:"content"`
 	Error   *struct {
+		Type    string `json:"type"`
 		Message string `json:"message"`
 	} `json:"error,omitempty"`
 }
@@ -200,12 +205,6 @@ type Aircraft struct {
 	Category       int      `json:"category"`
 }
 
-// OpenSkyResponse represents the API response from OpenSky Network
-type OpenSkyResponse struct {
-	Time   int64           `json:"time"`
-	States [][]interface{} `json:"states"`
-}
-
 // AirspaceData represents processed data sent to clients
 type AirspaceData struct {
 	Timestamp int64      `json:"timestamp"`
@@ -225,13 +224,6 @@ type Region struct {
 
 // Predefined regions
 var regions = map[string]Region{
-	"taiwan": {
-		Name:   "Taiwan Strait",
-		MinLat: 21.5,
-		MaxLat: 26.0,
-		MinLon: 117.0,
-		MaxLon: 123.0,
-	},
 	"socal": {
 		Name:   "Southern California",
 		MinLat: 32.5,
@@ -246,12 +238,73 @@ var regions = map[string]Region{
 		MinLon: -8.2,
 		MaxLon: 1.8,
 	},
-	"global": {
-		Name:   "Global",
-		MinLat: -90.0,
-		MaxLat: 90.0,
-		MinLon: -180.0,
-		MaxLon: 180.0,
+}
+
+// Simulated flight route
+type SimRoute struct {
+	Callsign      string
+	OriginCountry string
+	DepLat, DepLon float64
+	ArrLat, ArrLon float64
+	CycleSec      float64 // how many seconds for a full route cycle
+	PhaseOffset   float64 // offset in seconds so flights don't bunch up
+}
+
+// Predefined routes for each region
+var simRoutes = map[string][]SimRoute{
+	"socal": {
+		{"UAL1522", "United States", 33.94, -118.41, 37.62, -122.38, 2400, 0},      // LAX→SFO
+		{"SWA437",  "United States", 33.94, -118.41, 36.08, -115.15, 1800, 200},     // LAX→LAS
+		{"DAL892",  "United States", 33.94, -118.41, 33.44, -112.01, 2100, 400},     // LAX→PHX
+		{"AAL118",  "United States", 33.94, -118.41, 32.90, -97.04, 5400, 600},      // LAX→DFW
+		{"UAL489",  "United States", 33.94, -118.41, 39.86, -104.67, 4200, 800},     // LAX→DEN
+		{"JBU624",  "United States", 32.73, -117.19, 37.62, -122.38, 2700, 1000},    // SAN→SFO
+		{"SWA1203", "United States", 32.73, -117.19, 36.08, -115.15, 1800, 1200},    // SAN→LAS
+		{"AAL2145", "United States", 34.06, -117.60, 41.97, -87.91, 7200, 1400},     // ONT→ORD
+		{"SWA318",  "United States", 34.20, -118.36, 36.08, -115.15, 1800, 1600},    // BUR→LAS
+		{"DAL1847", "United States", 33.94, -118.41, 47.45, -122.31, 5400, 1800},    // LAX→SEA
+		{"UAL2210", "United States", 33.94, -118.41, 41.97, -87.91, 7800, 2000},     // LAX→ORD
+		{"AAL734",  "United States", 33.94, -118.41, 40.64, -73.78, 10800, 2200},    // LAX→JFK
+		{"SWA992",  "United States", 33.94, -118.41, 33.64, -84.43, 8400, 2400},     // LAX→ATL
+		{"UAL157",  "United States", 37.62, -122.38, 33.94, -118.41, 2400, 2600},    // SFO→LAX
+		{"SWA814",  "United States", 36.08, -115.15, 33.94, -118.41, 1800, 2800},    // LAS→LAX
+		{"DAL445",  "United States", 33.44, -112.01, 33.94, -118.41, 2100, 3000},    // PHX→LAX
+		{"AAL670",  "United States", 32.90, -97.04, 33.94, -118.41, 5400, 3200},     // DFW→LAX
+		{"SWA2308", "United States", 32.73, -117.19, 33.44, -112.01, 1500, 3400},    // SAN→PHX
+		{"HAL11",   "United States", 33.94, -118.41, 21.32, -157.92, 10800, 3600},   // LAX→HNL
+		{"UAL796",  "United States", 39.86, -104.67, 33.94, -118.41, 4200, 3800},    // DEN→LAX
+		{"SWA1654", "United States", 36.08, -115.15, 32.73, -117.19, 1800, 4000},    // LAS→SAN
+		{"AAL1890", "United States", 33.94, -118.41, 25.80, -80.29, 9600, 4200},     // LAX→MIA
+		{"DAL2034", "United States", 33.64, -84.43, 33.94, -118.41, 8400, 4400},     // ATL→LAX
+		{"JBU127",  "United States", 40.64, -73.78, 33.94, -118.41, 10800, 4600},    // JFK→LAX
+		{"SKW5412", "United States", 33.94, -118.41, 34.06, -117.60, 600, 4800},     // LAX→ONT shuttle
+	},
+	"europe": {
+		{"BAW115",  "United Kingdom", 51.47, -0.45, 40.64, -73.78, 14400, 0},        // LHR→JFK
+		{"BAW303",  "United Kingdom", 51.47, -0.45, 49.01, 2.55, 2400, 300},         // LHR→CDG
+		{"EZY8901", "United Kingdom", 51.15, -0.18, 41.30, 2.08, 4800, 600},         // LGW→BCN
+		{"RYR217",  "United Kingdom", 51.89, 0.24, 53.43, -6.25, 2400, 900},         // STN→DUB
+		{"EZY6023", "United Kingdom", 53.35, -2.28, 55.95, -3.36, 1800, 1200},       // MAN→EDI
+		{"BAW1446", "United Kingdom", 51.47, -0.45, 52.31, 4.77, 2400, 1500},        // LHR→AMS
+		{"VIR401",  "United Kingdom", 51.47, -0.45, 33.94, -118.41, 18000, 1800},    // LHR→LAX
+		{"EZY435",  "United Kingdom", 51.47, -0.45, 55.95, -3.36, 2700, 2100},       // LHR→EDI
+		{"BAW225",  "United Kingdom", 51.47, -0.45, 25.25, 55.36, 12600, 2400},      // LHR→DXB
+		{"RYR812",  "United Kingdom", 51.89, 0.24, 41.80, 12.24, 5400, 2700},        // STN→FCO
+		{"LOG301",  "United Kingdom", 55.95, -3.36, 51.47, -0.45, 2700, 3000},       // EDI→LHR
+		{"EZY6210", "United Kingdom", 51.15, -0.18, 52.31, 4.77, 2400, 3300},        // LGW→AMS
+		{"BAW883",  "United Kingdom", 51.47, -0.45, 50.04, 8.56, 3600, 3600},        // LHR→FRA
+		{"EZY321",  "United Kingdom", 53.35, -2.28, 38.78, -9.14, 6000, 3900},       // MAN→LIS
+		{"RYR506",  "United Kingdom", 51.89, 0.24, 40.50, -3.57, 5400, 4200},        // STN→MAD
+		{"BAW762",  "United Kingdom", 51.47, -0.45, 47.46, 8.55, 3600, 4500},        // LHR→ZRH
+		{"TOM2314", "United Kingdom", 53.35, -2.28, 41.30, 2.08, 4800, 4800},        // MAN→BCN
+		{"AFR1081", "France",         49.01, 2.55, 51.47, -0.45, 2400, 5100},        // CDG→LHR
+		{"KLM1024", "Netherlands",    52.31, 4.77, 51.47, -0.45, 2400, 5400},        // AMS→LHR
+		{"EIN208",  "Ireland",        53.43, -6.25, 51.47, -0.45, 2700, 5700},       // DUB→LHR
+		{"SAS502",  "Norway",         60.19, 11.10, 51.47, -0.45, 4800, 6000},       // OSL→LHR
+		{"BAW2721", "United Kingdom", 51.47, -0.45, 55.62, 12.65, 4200, 6300},       // LHR→CPH
+		{"DLH902",  "Germany",        50.04, 8.56, 51.47, -0.45, 3600, 6600},        // FRA→LHR
+		{"EZY104",  "United Kingdom", 51.38, -2.72, 49.01, 2.55, 3000, 6900},        // BRS→CDG
+		{"RYR9144", "United Kingdom", 55.04, -1.69, 41.30, 2.08, 5400, 7200},        // NCL→BCN
 	},
 }
 
@@ -267,16 +320,6 @@ var (
 	clientsMutex sync.RWMutex
 	airspaceCache = make(map[string]*AirspaceData)
 	cacheMutex   sync.RWMutex
-
-	// Global rate limiter — ensures only 1 OpenSky request at a time
-	// with minimum gap between requests
-	openSkyMutex    sync.Mutex
-	lastOpenSkyCall time.Time
-
-	// OAuth2 token management for OpenSky
-	oauthToken      string
-	oauthTokenExpiry time.Time
-	oauthTokenMutex  sync.Mutex
 )
 
 func main() {
@@ -285,44 +328,40 @@ func main() {
 		port = "8080"
 	}
 
-	openSkyClientID := os.Getenv("OPENSKY_CLIENT_ID")
-	openSkyUser := os.Getenv("OPENSKY_USERNAME")
-	openSkyPass := os.Getenv("OPENSKY_PASSWORD")
-	
-	pollInterval := 15 * time.Second
-	if openSkyClientID != "" {
-		pollInterval = 10 * time.Second
-		log.Printf("✅ OpenSky OAuth2 mode (client: %s...) — poll every %v", openSkyClientID[:min(12, len(openSkyClientID))], pollInterval)
-	} else if openSkyUser != "" && openSkyPass != "" {
-		pollInterval = 10 * time.Second
-		log.Printf("✅ OpenSky Basic Auth as: %s — poll every %v", openSkyUser, pollInterval)
-	} else {
-		log.Println("⚠️  OpenSky anonymous mode — limited to 400 credits/day")
-		log.Println("   Add OPENSKY_CLIENT_ID + OPENSKY_CLIENT_SECRET to .env")
-	}
-
-	// Start background polling — stagger by half the interval
-	go pollOpenSky("taiwan", pollInterval)
-	go func() {
-		time.Sleep(pollInterval / 2) // offset to avoid simultaneous requests
-		pollOpenSky("socal", pollInterval)
-	}()
+	// Start simulated aircraft traffic for both regions
+	go simulateAircraftTraffic("socal", 2*time.Second)
+	go simulateAircraftTraffic("europe", 2*time.Second)
 
 	// Start background AI analysis
-	go runTacticalAnalysis("taiwan", 30*time.Second)
 	go runTacticalAnalysis("socal", 30*time.Second)
+	go runTacticalAnalysis("europe", 30*time.Second)
+
+	// Start drone simulator
+	droneFleet = fprime.NewFleet()
+	droneSim = fprime.NewSimulator(droneFleet, fprime.DefaultSimConfig())
+	droneSim.Start()
+	log.Println("🚁 Drone simulator started (3 drones in formation)")
 
 	mux := http.NewServeMux()
-	
-	// WebSocket endpoint
+
+	// WebSocket endpoints
 	mux.HandleFunc("/ws", handleWebSocket)
-	
+	mux.HandleFunc("/ws/drones", handleDroneWebSocket)
+
 	// REST endpoints
 	mux.HandleFunc("/api/aircraft", handleGetAircraft)
 	mux.HandleFunc("/api/regions", handleGetRegions)
 	mux.HandleFunc("/api/health", handleHealth)
 	mux.HandleFunc("/api/analysis", handleGetAnalysis)
 	mux.HandleFunc("/api/analyze", handleRunAnalysis)
+
+	// Drone API endpoints
+	mux.HandleFunc("/api/drones", handleGetDrones)
+	mux.HandleFunc("/api/drones/telemetry", handleGetDroneTelemetry)
+	mux.HandleFunc("/api/drones/events", handleGetDroneEvents)
+	mux.HandleFunc("/api/drones/fsm", handleGetDroneFSM)
+	mux.HandleFunc("/api/drones/config", handleDroneConfig)
+	mux.HandleFunc("/api/drones/validate", handleDroneValidate)
 
 	// Serve static files from frontend build (for production)
 	fs := http.FileServer(http.Dir("./static"))
@@ -340,9 +379,11 @@ func main() {
 
 	log.Printf("Swarm C2 Backend starting on port %s", port)
 	log.Printf("WebSocket: ws://localhost:%s/ws", port)
-	log.Printf("REST API: http://localhost:%s/api/aircraft?region=taiwan", port)
-	log.Printf("AI Analysis: http://localhost:%s/api/analysis?region=taiwan", port)
-	
+	log.Printf("Drone WS: ws://localhost:%s/ws/drones", port)
+	log.Printf("REST API: http://localhost:%s/api/aircraft?region=socal", port)
+	log.Printf("Drone API: http://localhost:%s/api/drones", port)
+	log.Printf("AI Analysis: http://localhost:%s/api/analysis?region=socal", port)
+
 	if err := http.ListenAndServe(":"+port, handler); err != nil {
 		log.Fatal(err)
 	}
@@ -363,9 +404,9 @@ func runTacticalAnalysis(regionName string, interval time.Duration) {
 }
 
 func performAnalysis(regionName string) {
-	apiKey := os.Getenv("OPENAI_API_KEY")
+	apiKey := os.Getenv("ANTHROPIC_API_KEY")
 	if apiKey == "" {
-		log.Printf("[%s] OPENAI_API_KEY not set, skipping analysis", regionName)
+		log.Printf("[%s] ANTHROPIC_API_KEY not set, skipping analysis", regionName)
 		return
 	}
 
@@ -379,7 +420,7 @@ func performAnalysis(regionName string) {
 		return
 	}
 
-	analysis, err := callOpenAIAnalysis(apiKey, regionName, data.Aircraft)
+	analysis, err := callAnthropicAnalysis(apiKey, regionName, data.Aircraft)
 	if err != nil {
 		log.Printf("[%s] AI analysis error: %v", regionName, err)
 		return
@@ -396,10 +437,10 @@ func performAnalysis(regionName string) {
 	broadcastAnalysisToClients(regionName, analysis)
 }
 
-func callOpenAIAnalysis(apiKey string, region string, aircraft []Aircraft) (*TacticalAnalysis, error) {
+func callAnthropicAnalysis(apiKey string, region string, aircraft []Aircraft) (*TacticalAnalysis, error) {
 	// Prepare aircraft data summary for the prompt
 	aircraftJSON, _ := json.MarshalIndent(aircraft, "", "  ")
-	
+
 	userPrompt := fmt.Sprintf(`Analyze the following real-time aircraft tracking data for the %s region.
 
 Current timestamp: %s
@@ -408,21 +449,21 @@ Total aircraft tracked: %d
 Aircraft Data:
 %s
 
-Provide your tactical analysis in the specified JSON format.`, 
+Provide your tactical analysis in the specified JSON format.`,
 		region,
 		time.Now().UTC().Format(time.RFC3339),
 		len(aircraft),
 		string(aircraftJSON),
 	)
 
-	reqBody := OpenAIRequest{
-		Model: "gpt-4o",
-		Messages: []OpenAIMessage{
-			{Role: "system", Content: TACTICAL_SYSTEM_PROMPT},
+	reqBody := AnthropicRequest{
+		Model:       "claude-sonnet-4-20250514",
+		MaxTokens:   2000,
+		System:      TACTICAL_SYSTEM_PROMPT,
+		Messages: []AnthropicMessage{
 			{Role: "user", Content: userPrompt},
 		},
 		Temperature: 0.3,
-		MaxTokens:   2000,
 	}
 
 	jsonBody, err := json.Marshal(reqBody)
@@ -430,13 +471,14 @@ Provide your tactical analysis in the specified JSON format.`,
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewBuffer(jsonBody))
+	req, err := http.NewRequest("POST", "https://api.anthropic.com/v1/messages", bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("x-api-key", apiKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
 
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
@@ -450,21 +492,21 @@ Provide your tactical analysis in the specified JSON format.`,
 		return nil, fmt.Errorf("read response: %w", err)
 	}
 
-	var openAIResp OpenAIResponse
-	if err := json.Unmarshal(body, &openAIResp); err != nil {
+	var anthropicResp AnthropicResponse
+	if err := json.Unmarshal(body, &anthropicResp); err != nil {
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
 
-	if openAIResp.Error != nil {
-		return nil, fmt.Errorf("OpenAI error: %s", openAIResp.Error.Message)
+	if anthropicResp.Error != nil {
+		return nil, fmt.Errorf("Anthropic error: %s", anthropicResp.Error.Message)
 	}
 
-	if len(openAIResp.Choices) == 0 {
-		return nil, fmt.Errorf("no response choices")
+	if len(anthropicResp.Content) == 0 {
+		return nil, fmt.Errorf("no response content")
 	}
 
 	// Parse the JSON response from the AI
-	content := openAIResp.Choices[0].Message.Content
+	content := anthropicResp.Content[0].Text
 	
 	// Try to extract JSON from the response (may be wrapped in markdown)
 	jsonStart := 0
@@ -543,7 +585,7 @@ func broadcastAnalysisToClients(region string, analysis *TacticalAnalysis) {
 func handleGetAnalysis(w http.ResponseWriter, r *http.Request) {
 	region := r.URL.Query().Get("region")
 	if region == "" {
-		region = "taiwan"
+		region = "socal"
 	}
 
 	analysisCacheMutex.RLock()
@@ -574,13 +616,13 @@ func handleRunAnalysis(w http.ResponseWriter, r *http.Request) {
 
 	region := r.URL.Query().Get("region")
 	if region == "" {
-		region = "taiwan"
+		region = "socal"
 	}
 
 	// Run analysis synchronously
-	apiKey := os.Getenv("OPENAI_API_KEY")
+	apiKey := os.Getenv("ANTHROPIC_API_KEY")
 	if apiKey == "" {
-		http.Error(w, "OPENAI_API_KEY not configured", http.StatusServiceUnavailable)
+		http.Error(w, "ANTHROPIC_API_KEY not configured", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -593,7 +635,7 @@ func handleRunAnalysis(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	analysis, err := callOpenAIAnalysis(apiKey, region, data.Aircraft)
+	analysis, err := callAnthropicAnalysis(apiKey, region, data.Aircraft)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -608,202 +650,149 @@ func handleRunAnalysis(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(analysis)
 }
 
-func pollOpenSky(regionName string, interval time.Duration) {
-	region, exists := regions[regionName]
-	if !exists {
-		log.Printf("Unknown region: %s", regionName)
+// simulateAircraftTraffic generates and broadcasts simulated flight positions
+func simulateAircraftTraffic(regionName string, interval time.Duration) {
+	routes, ok := simRoutes[regionName]
+	if !ok {
 		return
 	}
+
+	log.Printf("[%s] Aircraft simulator started (%d routes)", regionName, len(routes))
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	// Initial fetch
-	fetchAndBroadcast(regionName, region)
-
 	for range ticker.C {
-		fetchAndBroadcast(regionName, region)
-	}
-}
+		now := time.Now()
+		nowUnix := now.Unix()
+		t := float64(nowUnix)
 
-func fetchAndBroadcast(regionName string, region Region) {
-	aircraft, err := fetchOpenSkyData(region)
-	if err != nil {
-		log.Printf("Error fetching OpenSky data for %s: %v", regionName, err)
-		return
-	}
+		var aircraft []Aircraft
 
-	data := &AirspaceData{
-		Timestamp: time.Now().Unix(),
-		Aircraft:  aircraft,
-		Region:    regionName,
-		Count:     len(aircraft),
-	}
+		for i, route := range routes {
+			// Each flight cycles along its route with its own period and phase
+			progress := math.Mod((t+route.PhaseOffset), route.CycleSec) / route.CycleSec
+			// Bounce: go out 0→1, then return 1→0
+			if progress > 0.5 {
+				progress = 1.0 - (progress-0.5)*2
+			} else {
+				progress = progress * 2
+			}
+			// Clamp to in-flight range
+			progress = 0.05 + progress*0.9
 
-	// Update cache
-	cacheMutex.Lock()
-	airspaceCache[regionName] = data
-	cacheMutex.Unlock()
+			lat, lon := greatCircleInterpolate(
+				route.DepLat, route.DepLon,
+				route.ArrLat, route.ArrLon,
+				progress,
+			)
+			bearing := greatCircleBearing(lat, lon, route.ArrLat, route.ArrLon)
+			alt := estimateAltitude(progress)
+			speed := estimateSpeed(progress)
 
-	// Broadcast to subscribed clients
-	broadcastToClients(regionName, data)
+			icao24 := fmt.Sprintf("%06x", (i*7919+42)%0xFFFFFF)
+			vertRate := 0.0
+			if progress < 0.15 {
+				vertRate = 15.0
+			} else if progress > 0.85 {
+				vertRate = -12.0
+			}
 
-	log.Printf("[%s] Fetched %d aircraft", regionName, len(aircraft))
-}
-
-func getOpenSkyToken() (string, error) {
-	clientID := os.Getenv("OPENSKY_CLIENT_ID")
-	clientSecret := os.Getenv("OPENSKY_CLIENT_SECRET")
-	if clientID == "" || clientSecret == "" {
-		return "", fmt.Errorf("no OAuth2 credentials")
-	}
-
-	oauthTokenMutex.Lock()
-	defer oauthTokenMutex.Unlock()
-
-	// Return cached token if still valid (60s buffer)
-	if oauthToken != "" && time.Now().Before(oauthTokenExpiry.Add(-60*time.Second)) {
-		return oauthToken, nil
-	}
-
-	tokenURL := "https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token"
-	body := fmt.Sprintf("grant_type=client_credentials&client_id=%s&client_secret=%s", clientID, clientSecret)
-
-	resp, err := http.Post(tokenURL, "application/x-www-form-urlencoded", bytes.NewBufferString(body))
-	if err != nil {
-		return "", fmt.Errorf("token request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("token request returned %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	var tokenResp struct {
-		AccessToken string `json:"access_token"`
-		ExpiresIn   int    `json:"expires_in"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
-		return "", fmt.Errorf("token parse failed: %w", err)
-	}
-
-	oauthToken = tokenResp.AccessToken
-	oauthTokenExpiry = time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second)
-	log.Printf("🔑 OpenSky OAuth2 token acquired (expires in %ds)", tokenResp.ExpiresIn)
-	return oauthToken, nil
-}
-
-func fetchOpenSkyData(region Region) ([]Aircraft, error) {
-	// Global rate limiter: enforce minimum gap between OpenSky API calls
-	openSkyMutex.Lock()
-	hasAuth := os.Getenv("OPENSKY_CLIENT_ID") != "" || os.Getenv("OPENSKY_USERNAME") != ""
-	minGap := 6 * time.Second
-	if hasAuth {
-		minGap = 3 * time.Second
-	}
-	elapsed := time.Since(lastOpenSkyCall)
-	if elapsed < minGap {
-		wait := minGap - elapsed
-		log.Printf("⏳ Rate limiter: waiting %v before next OpenSky call", wait.Round(time.Millisecond))
-		time.Sleep(wait)
-	}
-	lastOpenSkyCall = time.Now()
-	openSkyMutex.Unlock()
-
-	url := fmt.Sprintf(
-		"https://opensky-network.org/api/states/all?lamin=%.2f&lomin=%.2f&lamax=%.2f&lomax=%.2f",
-		region.MinLat, region.MinLon, region.MaxLat, region.MaxLon,
-	)
-
-	client := &http.Client{Timeout: 15 * time.Second}
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("request build failed: %w", err)
-	}
-
-	// Auth priority: OAuth2 > Basic Auth > Anonymous
-	if os.Getenv("OPENSKY_CLIENT_ID") != "" {
-		token, err := getOpenSkyToken()
-		if err != nil {
-			log.Printf("⚠️  OAuth2 token error: %v (falling back to anonymous)", err)
-		} else {
-			req.Header.Set("Authorization", "Bearer "+token)
-		}
-	} else if os.Getenv("OPENSKY_USERNAME") != "" && os.Getenv("OPENSKY_PASSWORD") != "" {
-		req.SetBasicAuth(os.Getenv("OPENSKY_USERNAME"), os.Getenv("OPENSKY_PASSWORD"))
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusTooManyRequests {
-		return nil, fmt.Errorf("OpenSky rate limited (429) — will retry next cycle")
-	}
-
-	if resp.StatusCode == http.StatusUnauthorized {
-		// Clear cached OAuth token on 401
-		oauthTokenMutex.Lock()
-		oauthToken = ""
-		oauthTokenMutex.Unlock()
-		return nil, fmt.Errorf("OpenSky auth failed (401) — check credentials")
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API returned %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read body failed: %w", err)
-	}
-
-	var openSkyResp OpenSkyResponse
-	if err := json.Unmarshal(respBody, &openSkyResp); err != nil {
-		return nil, fmt.Errorf("JSON parse failed: %w", err)
-	}
-
-	return parseAircraftStates(openSkyResp.States), nil
-}
-
-func parseAircraftStates(states [][]interface{}) []Aircraft {
-	aircraft := make([]Aircraft, 0, len(states))
-
-	for _, state := range states {
-		if len(state) < 17 {
-			continue
-		}
-
-		ac := Aircraft{
-			ICAO24:         getString(state[0]),
-			Callsign:       getString(state[1]),
-			OriginCountry:  getString(state[2]),
-			TimePosition:   getInt64Ptr(state[3]),
-			LastContact:    getInt64(state[4]),
-			Longitude:      getFloat64Ptr(state[5]),
-			Latitude:       getFloat64Ptr(state[6]),
-			BaroAltitude:   getFloat64Ptr(state[7]),
-			OnGround:       getBool(state[8]),
-			Velocity:       getFloat64Ptr(state[9]),
-			TrueTrack:      getFloat64Ptr(state[10]),
-			VerticalRate:   getFloat64Ptr(state[11]),
-			GeoAltitude:    getFloat64Ptr(state[13]),
-			Squawk:         getStringPtr(state[14]),
-			SPI:            getBool(state[15]),
-			PositionSource: getInt(state[16]),
-		}
-
-		// Only include aircraft with valid positions
-		if ac.Latitude != nil && ac.Longitude != nil {
+			ac := Aircraft{
+				ICAO24:        icao24,
+				Callsign:      route.Callsign,
+				OriginCountry: route.OriginCountry,
+				TimePosition:  &nowUnix,
+				LastContact:   nowUnix,
+				Longitude:     &lon,
+				Latitude:      &lat,
+				BaroAltitude:  &alt,
+				OnGround:      false,
+				Velocity:      &speed,
+				TrueTrack:     &bearing,
+				VerticalRate:  &vertRate,
+				GeoAltitude:   &alt,
+			}
 			aircraft = append(aircraft, ac)
 		}
+
+		data := &AirspaceData{
+			Timestamp: nowUnix,
+			Aircraft:  aircraft,
+			Region:    regionName,
+			Count:     len(aircraft),
+		}
+
+		cacheMutex.Lock()
+		airspaceCache[regionName] = data
+		cacheMutex.Unlock()
+
+		broadcastToClients(regionName, data)
+	}
+}
+
+// greatCircleInterpolate returns lat/lon at fraction t along great circle from A to B
+func greatCircleInterpolate(lat1, lon1, lat2, lon2, t float64) (float64, float64) {
+	lat1R := lat1 * math.Pi / 180
+	lon1R := lon1 * math.Pi / 180
+	lat2R := lat2 * math.Pi / 180
+	lon2R := lon2 * math.Pi / 180
+
+	d := math.Acos(math.Sin(lat1R)*math.Sin(lat2R) + math.Cos(lat1R)*math.Cos(lat2R)*math.Cos(lon2R-lon1R))
+
+	if d < 0.0001 {
+		return lat1 + t*(lat2-lat1), lon1 + t*(lon2-lon1)
 	}
 
-	return aircraft
+	a := math.Sin((1-t)*d) / math.Sin(d)
+	b := math.Sin(t*d) / math.Sin(d)
+
+	x := a*math.Cos(lat1R)*math.Cos(lon1R) + b*math.Cos(lat2R)*math.Cos(lon2R)
+	y := a*math.Cos(lat1R)*math.Sin(lon1R) + b*math.Cos(lat2R)*math.Sin(lon2R)
+	z := a*math.Sin(lat1R) + b*math.Sin(lat2R)
+
+	lat := math.Atan2(z, math.Sqrt(x*x+y*y)) * 180 / math.Pi
+	lon := math.Atan2(y, x) * 180 / math.Pi
+
+	return lat, lon
+}
+
+// greatCircleBearing returns the bearing from (lat1,lon1) to (lat2,lon2) in degrees
+func greatCircleBearing(lat1, lon1, lat2, lon2 float64) float64 {
+	lat1R := lat1 * math.Pi / 180
+	lat2R := lat2 * math.Pi / 180
+	dLon := (lon2 - lon1) * math.Pi / 180
+
+	y := math.Sin(dLon) * math.Cos(lat2R)
+	x := math.Cos(lat1R)*math.Sin(lat2R) - math.Sin(lat1R)*math.Cos(lat2R)*math.Cos(dLon)
+
+	bearing := math.Atan2(y, x) * 180 / math.Pi
+	if bearing < 0 {
+		bearing += 360
+	}
+	return bearing
+}
+
+// estimateAltitude returns altitude in meters based on flight progress
+func estimateAltitude(progress float64) float64 {
+	cruiseAlt := 10668.0 // ~35000 ft in meters
+	if progress < 0.15 {
+		return cruiseAlt * (progress / 0.15)
+	} else if progress > 0.85 {
+		return cruiseAlt * ((1 - progress) / 0.15)
+	}
+	return cruiseAlt
+}
+
+// estimateSpeed returns speed in m/s based on flight progress
+func estimateSpeed(progress float64) float64 {
+	cruiseSpeed := 231.5 // ~450 kts in m/s
+	if progress < 0.1 {
+		return cruiseSpeed * 0.6
+	} else if progress > 0.9 {
+		return cruiseSpeed * 0.5
+	}
+	return cruiseSpeed
 }
 
 func handleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -816,7 +805,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// Default to Taiwan region
 	region := r.URL.Query().Get("region")
 	if region == "" {
-		region = "taiwan"
+		region = "socal"
 	}
 
 	clientsMutex.Lock()
@@ -885,7 +874,7 @@ func broadcastToClients(region string, data *AirspaceData) {
 func handleGetAircraft(w http.ResponseWriter, r *http.Request) {
 	region := r.URL.Query().Get("region")
 	if region == "" {
-		region = "taiwan"
+		region = "socal"
 	}
 
 	cacheMutex.RLock()
@@ -893,22 +882,11 @@ func handleGetAircraft(w http.ResponseWriter, r *http.Request) {
 	cacheMutex.RUnlock()
 
 	if !exists {
-		// Fetch fresh if not cached
-		regionDef, ok := regions[region]
-		if !ok {
-			http.Error(w, "Unknown region", http.StatusBadRequest)
-			return
-		}
-		aircraft, err := fetchOpenSkyData(regionDef)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
 		data = &AirspaceData{
 			Timestamp: time.Now().Unix(),
-			Aircraft:  aircraft,
+			Aircraft:  []Aircraft{},
 			Region:    region,
-			Count:     len(aircraft),
+			Count:     0,
 		}
 	}
 
@@ -930,53 +908,205 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Helper functions for type conversion
-func getString(v interface{}) string {
-	if s, ok := v.(string); ok {
-		return s
-	}
-	return ""
+// ========================= DRONE OPS =========================
+
+var (
+	droneFleet      *fprime.Fleet
+	droneSim        *fprime.Simulator
+	droneClients      = make(map[*websocket.Conn]bool)
+	droneClientsMutex sync.RWMutex
+)
+
+func init() {
+	// Start broadcasting drone telemetry to WS clients
+	go broadcastDroneTelemetry()
 }
 
-func getStringPtr(v interface{}) *string {
-	if s, ok := v.(string); ok {
-		return &s
+func broadcastDroneTelemetry() {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		if droneFleet == nil {
+			continue
+		}
+
+		drones := droneFleet.GetAllDrones()
+		events := droneFleet.GetEvents("", 10)
+
+		msg := map[string]interface{}{
+			"type":   "drone_telemetry",
+			"drones": drones,
+			"events": events,
+			"timestamp": time.Now().Unix(),
+		}
+
+		droneClientsMutex.RLock()
+		for conn := range droneClients {
+			if err := conn.WriteJSON(msg); err != nil {
+				log.Printf("Drone WS write error: %v", err)
+			}
+		}
+		droneClientsMutex.RUnlock()
 	}
-	return nil
 }
 
-func getFloat64Ptr(v interface{}) *float64 {
-	if f, ok := v.(float64); ok {
-		return &f
+func handleDroneWebSocket(w http.ResponseWriter, r *http.Request) {
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("Drone WebSocket upgrade failed: %v", err)
+		return
 	}
-	return nil
+
+	droneClientsMutex.Lock()
+	droneClients[conn] = true
+	droneClientsMutex.Unlock()
+
+	log.Println("Drone WS client connected")
+
+	// Send initial state
+	if droneFleet != nil {
+		conn.WriteJSON(map[string]interface{}{
+			"type":   "drone_telemetry",
+			"drones": droneFleet.GetAllDrones(),
+			"events": droneFleet.GetEvents("", 50),
+			"timestamp": time.Now().Unix(),
+		})
+	}
+
+	defer func() {
+		droneClientsMutex.Lock()
+		delete(droneClients, conn)
+		droneClientsMutex.Unlock()
+		conn.Close()
+		log.Println("Drone WS client disconnected")
+	}()
+
+	// Keep connection alive, read messages (unused for now)
+	for {
+		_, _, err := conn.ReadMessage()
+		if err != nil {
+			break
+		}
+	}
 }
 
-func getInt64Ptr(v interface{}) *int64 {
-	if f, ok := v.(float64); ok {
-		i := int64(f)
-		return &i
+func handleGetDrones(w http.ResponseWriter, r *http.Request) {
+	if droneFleet == nil {
+		http.Error(w, "Drone fleet not initialized", http.StatusServiceUnavailable)
+		return
 	}
-	return nil
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(droneFleet.GetAllDrones())
 }
 
-func getInt64(v interface{}) int64 {
-	if f, ok := v.(float64); ok {
-		return int64(f)
+func handleGetDroneTelemetry(w http.ResponseWriter, r *http.Request) {
+	if droneFleet == nil {
+		http.Error(w, "Drone fleet not initialized", http.StatusServiceUnavailable)
+		return
 	}
-	return 0
+	droneID := r.URL.Query().Get("drone_id")
+	if droneID != "" {
+		drone := droneFleet.GetDrone(droneID)
+		if drone == nil {
+			http.Error(w, "Drone not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(drone)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(droneFleet.GetAllDrones())
 }
 
-func getInt(v interface{}) int {
-	if f, ok := v.(float64); ok {
-		return int(f)
+func handleGetDroneEvents(w http.ResponseWriter, r *http.Request) {
+	if droneFleet == nil {
+		http.Error(w, "Drone fleet not initialized", http.StatusServiceUnavailable)
+		return
 	}
-	return 0
+	droneID := r.URL.Query().Get("drone_id")
+	limit := 50
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(droneFleet.GetEvents(droneID, limit))
 }
 
-func getBool(v interface{}) bool {
-	if b, ok := v.(bool); ok {
-		return b
+func handleGetDroneFSM(w http.ResponseWriter, r *http.Request) {
+	droneID := r.URL.Query().Get("drone_id")
+	result := map[string]interface{}{
+		"states":          fprime.AllStates,
+		"inputs":          fprime.AllInputs,
+		"transitionTable": fprime.TransitionTable,
 	}
-	return false
+	if droneFleet != nil && droneID != "" {
+		drone := droneFleet.GetDrone(droneID)
+		if drone != nil {
+			result["currentState"] = drone.FSMState
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+func handleDroneConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var config fprime.DroneConfig
+	if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
+		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Validate first
+	results := fprime.ValidateConfig(config, droneFleet)
+	allPass := true
+	for _, r := range results {
+		if !r.Pass {
+			allPass = false
+			break
+		}
+	}
+
+	if !allPass {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error":      "Validation failed",
+			"validation": results,
+		})
+		return
+	}
+
+	// Apply config (in simulation, just update budget limit)
+	drone := droneFleet.GetDrone(config.DroneID)
+	if drone != nil {
+		drone.Energy.BudgetLimit = config.EnergyBudgetLimit
+		droneFleet.UpdateDrone(drone)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":     "deployed",
+		"validation": results,
+	})
+}
+
+func handleDroneValidate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var config fprime.DroneConfig
+	if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
+		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	results := fprime.ValidateConfig(config, droneFleet)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(results)
 }

@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+vendor/
+
+# Build outputs
+backend/swarm-c2
+backend/swarmc2-server
+frontend/dist/
+backend/static/dist/
+backend/static/assets/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

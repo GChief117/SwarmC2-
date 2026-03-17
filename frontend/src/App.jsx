@@ -5,9 +5,9 @@ import TelemetryPanel from './components/TelemetryPanel';
 import AircraftList from './components/AircraftList';
 import AIAnalysisPanel from './components/AIAnalysisPanel';
 import Clock from './components/Clock';
+import DronePanel from './components/DronePanel';
 
 const REGIONS = {
-  taiwan: { name: 'Taiwan Strait', center: [120.5, 23.5], zoom: 6 },
   socal: { name: 'Southern California', center: [-118.5, 33.5], zoom: 7 },
   europe: { name: 'United Kingdom', center: [-2.5, 54.5], zoom: 5.5 },
 };
@@ -15,16 +15,24 @@ const REGIONS = {
 function App() {
   const [aircraft, setAircraft] = useState([]);
   const [selectedAircraft, setSelectedAircraft] = useState(null);
-  const [region, setRegion] = useState('taiwan');
-  const [viewMode, setViewMode] = useState('map');
+  const [region, setRegion] = useState('socal');
+  const [viewMode, setViewMode] = useState('globe');
   const [connected, setConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(null);
   const [aiAnalysis, setAiAnalysis] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
-  const [dataLoading, setDataLoading] = useState(true);  // True until first aircraft data arrives
+  const [dataLoading, setDataLoading] = useState(true);  // True until first data arrives
+  const [opsMode, setOpsMode] = useState('drone'); // 'aircraft' or 'drone'
+  const [drones, setDrones] = useState([]);
+  const [selectedDroneId, setSelectedDroneId] = useState(null);
+  const [droneEvents, setDroneEvents] = useState([]);
+  const [droneConnected, setDroneConnected] = useState(false);
   const wsRef = useRef(null);
+  const droneWsRef = useRef(null);
   const reconnectTimer = useRef(null);
+  const droneReconnectTimer = useRef(null);
   const intentionalClose = useRef(false);
+  const droneIntentionalClose = useRef(false);
   const regionRef = useRef(region);  // Always tracks current region for WS filtering
 
   const getApiBaseUrl = useCallback(() => {
@@ -77,13 +85,13 @@ function App() {
       }
 
       intentionalClose.current = false;
-      const ws = new WebSocket(`${getWsUrl()}?region=taiwan`);
+      const ws = new WebSocket(`${getWsUrl()}?region=socal`);
       wsRef.current = ws;
 
       ws.onopen = () => {
         console.log('WebSocket connected');
         setConnected(true);
-        fetchAnalysis('taiwan');
+        fetchAnalysis('socal');
       };
 
       ws.onmessage = (event) => {
@@ -137,6 +145,60 @@ function App() {
       }
     };
   }, [getWsUrl, fetchAnalysis]);
+
+  // Drone WebSocket connection
+  useEffect(() => {
+    const connectDrone = () => {
+      if (droneReconnectTimer.current) {
+        clearTimeout(droneReconnectTimer.current);
+        droneReconnectTimer.current = null;
+      }
+      droneIntentionalClose.current = false;
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const host = import.meta.env.DEV ? 'localhost:8080' : window.location.host;
+      const ws = new WebSocket(`${protocol}//${host}/ws/drones`);
+      droneWsRef.current = ws;
+
+      ws.onopen = () => {
+        console.log('Drone WS connected');
+        setDroneConnected(true);
+      };
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'drone_telemetry') {
+            setDrones(data.drones || []);
+            setDroneEvents(data.events || []);
+            if (data.drones && data.drones.length > 0) {
+              setDataLoading(false);
+            }
+          }
+        } catch (err) {
+          console.error('Drone WS parse error:', err);
+        }
+      };
+      ws.onclose = () => {
+        setDroneConnected(false);
+        droneWsRef.current = null;
+        if (!droneIntentionalClose.current) {
+          droneReconnectTimer.current = setTimeout(connectDrone, 3000);
+        }
+      };
+      ws.onerror = (err) => console.error('Drone WS error:', err);
+    };
+
+    connectDrone();
+
+    return () => {
+      droneIntentionalClose.current = true;
+      if (droneReconnectTimer.current) {
+        clearTimeout(droneReconnectTimer.current);
+      }
+      if (droneWsRef.current) {
+        droneWsRef.current.close();
+      }
+    };
+  }, []);
 
   // Handle region change — just send subscribe, don't recreate WS
   const handleRegionChange = (newRegion) => {
@@ -208,9 +270,23 @@ function App() {
               3D GLOBE
             </button>
           </div>
+          <div className="c2-ops-toggle">
+            <button
+              className={`c2-ops-btn ${opsMode === 'aircraft' ? 'active' : ''}`}
+              onClick={() => setOpsMode('aircraft')}
+            >
+              AIRCRAFT
+            </button>
+            <button
+              className={`c2-ops-btn drone ${opsMode === 'drone' ? 'active' : ''}`}
+              onClick={() => setOpsMode('drone')}
+            >
+              DRONE OPS
+            </button>
+          </div>
           <div className="c2-stats">
             <div className="c2-stat">
-              <span className="c2-stat-value">{aircraft.length}</span>
+              <span className="c2-stat-value">{opsMode === 'drone' ? drones.length : aircraft.length}</span>
               <span className="c2-stat-label">TRACKED</span>
             </div>
             <div className="c2-stat">
@@ -236,6 +312,9 @@ function App() {
               region={REGIONS[region]}
               selectedAircraft={selectedAircraft}
               onSelectAircraft={handleSelectAircraft}
+              drones={drones}
+              selectedDroneId={selectedDroneId}
+              onSelectDrone={setSelectedDroneId}
             />
           )}
 
@@ -250,8 +329,8 @@ function App() {
             </div>
           </div>
 
-          {/* Loading overlay */}
-          {dataLoading && (
+          {/* Loading overlay — hidden in drone mode once drones arrive */}
+          {dataLoading && !(opsMode === 'drone' && drones.length > 0) && (
             <div className="c2-loading-overlay">
               <div className="c2-loading-content">
                 <div className="c2-loading-radar">
@@ -271,26 +350,37 @@ function App() {
         </div>
 
         <aside className="c2-sidebar">
-          <AIAnalysisPanel 
-            analysis={aiAnalysis}
-            onRefresh={refreshAnalysis}
-            isLoading={aiLoading}
-            onSelectAircraft={handleSelectAircraft}
-            aircraft={aircraft}
-          />
-
-          {selectedAircraft && (
-            <TelemetryPanel
-              aircraft={selectedAircraft}
-              onClose={() => setSelectedAircraft(null)}
+          {opsMode === 'drone' ? (
+            <DronePanel
+              drones={drones}
+              selectedDroneId={selectedDroneId}
+              onSelectDrone={setSelectedDroneId}
+              droneEvents={droneEvents}
             />
-          )}
+          ) : (
+            <>
+              <AIAnalysisPanel
+                analysis={aiAnalysis}
+                onRefresh={refreshAnalysis}
+                isLoading={aiLoading}
+                onSelectAircraft={handleSelectAircraft}
+                aircraft={aircraft}
+              />
 
-          <AircraftList
-            aircraft={aircraft}
-            selectedAircraft={selectedAircraft}
-            onSelectAircraft={handleSelectAircraft}
-          />
+              {selectedAircraft && (
+                <TelemetryPanel
+                  aircraft={selectedAircraft}
+                  onClose={() => setSelectedAircraft(null)}
+                />
+              )}
+
+              <AircraftList
+                aircraft={aircraft}
+                selectedAircraft={selectedAircraft}
+                onSelectAircraft={handleSelectAircraft}
+              />
+            </>
+          )}
         </aside>
       </main>
     </div>
